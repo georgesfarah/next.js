@@ -183,6 +183,12 @@ pub struct MetaFile {
     obsolete_entries: Vec<u32>,
     /// The obsolete SST files.
     obsolete_sst_files: Vec<u32>,
+    /// The offset of the start of the "used keys" AMQF data in the meta file relative to the end
+    /// of the header.
+    start_of_used_keys_amqf_data_offset: u32,
+    /// The offset of the end of the "used keys" AMQF data in the the meta file relative to the end
+    /// of the header.
+    end_of_used_keys_amqf_data_offset: u32,
     /// The memory mapped file.
     mmap: Mmap,
 }
@@ -232,6 +238,9 @@ impl MetaFile {
             start_of_amqf_data_offset = entry.end_of_amqf_data_offset;
             entries.push(entry);
         }
+        let start_of_used_keys_amqf_data_offset = start_of_amqf_data_offset;
+        let end_of_used_keys_amqf_data_offset = file.read_u32::<BE>()?;
+
         let offset = file.stream_position()?;
         let file = file.into_inner();
         let mut options = MmapOptions::new();
@@ -246,6 +255,8 @@ impl MetaFile {
             entries,
             obsolete_entries: Vec::new(),
             obsolete_sst_files,
+            start_of_used_keys_amqf_data_offset,
+            end_of_used_keys_amqf_data_offset,
             mmap,
         };
         Ok(file)

@@ -11,8 +11,10 @@ use std::{
 
 use anyhow::{Context, Result, bail};
 use byteorder::{BE, ReadBytesExt, WriteBytesExt};
+use dashmap::DashSet;
 use jiff::Timestamp;
 use memmap2::Mmap;
+use nohash_hasher::BuildNoHashHasher;
 use parking_lot::{Mutex, RwLock};
 
 pub use crate::compaction::selector::CompactConfig;
@@ -104,7 +106,7 @@ struct TrackedStats {
 
 /// TurboPersistence is a persistent key-value store. It is limited to a single writer at a time
 /// using a single write batch. It allows for concurrent reads.
-pub struct TurboPersistence<S: ParallelScheduler> {
+pub struct TurboPersistence<S: ParallelScheduler, const FAMILIES: usize> {
     parallel_scheduler: S,
     /// The path to the directory where the database is stored
     path: PathBuf,
@@ -112,7 +114,7 @@ pub struct TurboPersistence<S: ParallelScheduler> {
     /// no modification on the database is performed.
     read_only: bool,
     /// The inner state of the database. Writing will update that.
-    inner: RwLock<Inner>,
+    inner: RwLock<Inner<FAMILIES>>,
     /// A flag to indicate if a write operation is currently active. Prevents multiple concurrent
     /// write operations.
     active_write_operation: AtomicBool,
@@ -128,11 +130,15 @@ pub struct TurboPersistence<S: ParallelScheduler> {
 }
 
 /// The inner state of the database.
-struct Inner {
+struct Inner<const FAMILIES: usize> {
     /// The list of meta files in the database. This is used to derive the SST files.
     meta_files: Vec<MetaFile>,
     /// The current sequence number for the database.
     current_sequence_number: u32,
+    /// The in progress set of hashes of keys that have been accessed.
+    /// It will be flushed onto disk (into a meta file) on next commit.
+    /// It's a dashset to allow modification while only tracking a read lock on Inner.
+    accessed_key_hashes: [DashSet<u64, BuildNoHashHasher<u64>>; FAMILIES],
 }
 
 pub struct CommitOptions {
@@ -145,7 +151,7 @@ pub struct CommitOptions {
     keys_written: u64,
 }
 
-impl<S: ParallelScheduler + Default> TurboPersistence<S> {
+impl<S: ParallelScheduler + Default, const FAMILIES: usize> TurboPersistence<S, FAMILIES> {
     /// Open a TurboPersistence database at the given path.
     /// This will read the directory and might performance cleanup when the database was not closed
     /// properly. Cleanup only requires to read a few bytes from a few files and to delete
@@ -161,7 +167,7 @@ impl<S: ParallelScheduler + Default> TurboPersistence<S> {
     }
 }
 
-impl<S: ParallelScheduler> TurboPersistence<S> {
+impl<S: ParallelScheduler, const FAMILIES: usize> TurboPersistence<S, FAMILIES> {
     fn new(path: PathBuf, read_only: bool, parallel_scheduler: S) -> Self {
         Self {
             parallel_scheduler,
@@ -170,6 +176,8 @@ impl<S: ParallelScheduler> TurboPersistence<S> {
             inner: RwLock::new(Inner {
                 meta_files: Vec::new(),
                 current_sequence_number: 0,
+                accessed_key_hashes: [(); FAMILIES]
+                    .map(|_| DashSet::with_hasher(BuildNoHashHasher::default())),
             }),
             active_write_operation: AtomicBool::new(false),
             amqf_cache: AmqfCache::with(
@@ -405,7 +413,7 @@ impl<S: ParallelScheduler> TurboPersistence<S> {
     /// time. The WriteBatch need to be committed with [`TurboPersistence::commit_write_batch`].
     /// Note that the WriteBatch might start writing data to disk while it's filled up with data.
     /// This data will only become visible after the WriteBatch is committed.
-    pub fn write_batch<K: StoreKey + Send + Sync + 'static, const FAMILIES: usize>(
+    pub fn write_batch<K: StoreKey + Send + Sync + 'static>(
         &self,
     ) -> Result<WriteBatch<K, S, FAMILIES>> {
         if self.read_only {
@@ -443,7 +451,7 @@ impl<S: ParallelScheduler> TurboPersistence<S> {
 
     /// Commits a WriteBatch to the database. This will finish writing the data to disk and make it
     /// visible to readers.
-    pub fn commit_write_batch<K: StoreKey + Send + Sync + 'static, const FAMILIES: usize>(
+    pub fn commit_write_batch<K: StoreKey + Send + Sync + 'static>(
         &self,
         mut write_batch: WriteBatch<K, S, FAMILIES>,
     ) -> Result<()> {
@@ -456,7 +464,27 @@ impl<S: ParallelScheduler> TurboPersistence<S> {
             new_sst_files,
             new_blob_files,
             keys_written,
-        } = write_batch.finish()?;
+        } = write_batch.finish(|family| {
+            let inner = self.inner.read();
+            let set = &inner.accessed_key_hashes[family as usize];
+            // len is only a snapshot at that time and it can change while we create the filter.
+            // So we give it 5% more space to make resizes less likely.
+            let initial_capacity = set.len() * 19 / 20;
+            let mut amqf =
+                qfilter::Filter::with_fingerprint_size(initial_capacity as u64, u64::BITS as u8)
+                    .unwrap();
+            // This drains items from the set. But due to concurrency it might not be empty
+            // afterwards, but that's fine. It will be part of the next commit.
+            set.retain(|hash| {
+                // Performance-wise it would usually be better to insert sorted fingerprints, but we
+                // assume that hashes are equally distributed, which makes it unnecessary.
+                // Good for cache locality is that we insert in the order of the dashset's buckets.
+                amqf.insert_fingerprint(false, *hash)
+                    .expect("Failed to insert fingerprint");
+                false
+            });
+            amqf
+        })?;
         self.commit(CommitOptions {
             new_meta_files,
             new_sst_files,
@@ -1178,24 +1206,27 @@ impl<S: ParallelScheduler> TurboPersistence<S> {
                     self.stats.miss_amqf.fetch_add(1, Ordering::Relaxed);
                 }
                 MetaLookupResult::SstLookup(result) => match result {
-                    SstLookupResult::Found(result) => match result {
-                        LookupValue::Deleted => {
-                            #[cfg(feature = "stats")]
-                            self.stats.hits_deleted.fetch_add(1, Ordering::Relaxed);
-                            return Ok(None);
+                    SstLookupResult::Found(result) => {
+                        inner.accessed_key_hashes[family].insert(hash);
+                        match result {
+                            LookupValue::Deleted => {
+                                #[cfg(feature = "stats")]
+                                self.stats.hits_deleted.fetch_add(1, Ordering::Relaxed);
+                                return Ok(None);
+                            }
+                            LookupValue::Slice { value } => {
+                                #[cfg(feature = "stats")]
+                                self.stats.hits_small.fetch_add(1, Ordering::Relaxed);
+                                return Ok(Some(value));
+                            }
+                            LookupValue::Blob { sequence_number } => {
+                                #[cfg(feature = "stats")]
+                                self.stats.hits_blob.fetch_add(1, Ordering::Relaxed);
+                                let blob = self.read_blob(sequence_number)?;
+                                return Ok(Some(blob));
+                            }
                         }
-                        LookupValue::Slice { value } => {
-                            #[cfg(feature = "stats")]
-                            self.stats.hits_small.fetch_add(1, Ordering::Relaxed);
-                            return Ok(Some(value));
-                        }
-                        LookupValue::Blob { sequence_number } => {
-                            #[cfg(feature = "stats")]
-                            self.stats.hits_blob.fetch_add(1, Ordering::Relaxed);
-                            let blob = self.read_blob(sequence_number)?;
-                            return Ok(Some(blob));
-                        }
-                    },
+                    }
                     SstLookupResult::NotFound => {
                         #[cfg(feature = "stats")]
                         self.stats.miss_key.fetch_add(1, Ordering::Relaxed);

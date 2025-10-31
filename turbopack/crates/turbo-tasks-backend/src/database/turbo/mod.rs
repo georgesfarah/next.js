@@ -21,6 +21,9 @@ use crate::database::{
 
 mod parallel_scheduler;
 
+/// Number of key families, see KeySpace enum for their numbers.
+const FAMILIES: usize = 5;
+
 const MB: u64 = 1024 * 1024;
 const COMPACT_CONFIG: CompactConfig = CompactConfig {
     min_merge_count: 3,
@@ -33,7 +36,7 @@ const COMPACT_CONFIG: CompactConfig = CompactConfig {
 };
 
 pub struct TurboKeyValueDatabase {
-    db: Arc<TurboPersistence<TurboTasksParallelScheduler>>,
+    db: Arc<TurboPersistence<TurboTasksParallelScheduler, FAMILIES>>,
     compact_join_handle: Mutex<Option<JoinHandle<Result<()>>>>,
     is_ci: bool,
     is_short_session: bool,
@@ -129,7 +132,7 @@ impl KeyValueDatabase for TurboKeyValueDatabase {
 }
 
 fn do_compact(
-    db: &TurboPersistence<TurboTasksParallelScheduler>,
+    db: &TurboPersistence<TurboTasksParallelScheduler, FAMILIES>,
     message: &'static str,
     max_merge_segment_count: usize,
 ) -> Result<()> {
@@ -151,8 +154,9 @@ fn do_compact(
 }
 
 pub struct TurboWriteBatch<'a> {
-    batch: turbo_persistence::WriteBatch<WriteBuffer<'static>, TurboTasksParallelScheduler, 5>,
-    db: &'a Arc<TurboPersistence<TurboTasksParallelScheduler>>,
+    batch:
+        turbo_persistence::WriteBatch<WriteBuffer<'static>, TurboTasksParallelScheduler, FAMILIES>,
+    db: &'a Arc<TurboPersistence<TurboTasksParallelScheduler, FAMILIES>>,
     compact_join_handle: Option<&'a Mutex<Option<JoinHandle<Result<()>>>>>,
 }
 

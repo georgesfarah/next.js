@@ -16,7 +16,7 @@ fn main() -> Result<()> {
         bail!("The provided path does not exist: {}", path.display());
     }
 
-    let db: TurboPersistence<SerialScheduler> = TurboPersistence::open_read_only(path)?;
+    let db: TurboPersistence<SerialScheduler, 0> = TurboPersistence::open_read_only(path)?;
     let meta_info = db
         .meta_info()
         .context("Failed to retrieve meta information")?;

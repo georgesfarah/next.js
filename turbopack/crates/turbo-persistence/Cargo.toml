@@ -13,12 +13,14 @@ print_stats = ["stats"]
 
 [dependencies]
 anyhow = { workspace = true }
+dashmap = { workspace = true}
 either = { workspace = true }
 pot = "3.0.0"
 byteorder = { workspace = true }
 jiff = "0.2.10"
 lzzzz = "1.1.0"
 memmap2 = "0.9.5"
+nohash-hasher = { workspace = true }
 parking_lot = { workspace = true }
 qfilter = { version = "0.2.4", features = ["serde"] }
 quick_cache = { workspace = true }
