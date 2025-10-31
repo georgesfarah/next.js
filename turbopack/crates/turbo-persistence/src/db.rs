@@ -803,15 +803,7 @@ impl<S: ParallelScheduler, const FAMILIES: usize> TurboPersistence<S, FAMILIES> 
             })
             .collect::<Vec<_>>();
 
-        let families = ssts_with_ranges
-            .iter()
-            .map(|s| s.range.family)
-            .max()
-            .unwrap() as usize
-            + 1;
-
-        let mut sst_by_family = Vec::with_capacity(families);
-        sst_by_family.resize_with(families, Vec::new);
+        let mut sst_by_family = [(); FAMILIES].map(|_| Vec::new());
 
         for sst in ssts_with_ranges {
             sst_by_family[sst.range.family as usize].push(sst);
@@ -845,6 +837,22 @@ impl<S: ParallelScheduler, const FAMILIES: usize> TurboPersistence<S, FAMILIES> 
                 Some((family, ssts_with_ranges, merge_jobs))
             })
             .collect::<Vec<_>>();
+
+        let mut used_key_hashes = [(); FAMILIES].map(|_| Vec::new());
+
+        {
+            for &(family, ..) in merge_jobs.iter() {
+                used_key_hashes[family].extend(
+                    meta_files
+                        .iter()
+                        .filter(|m| m.family() == family as u32)
+                        .filter_map(|meta_file| {
+                            meta_file.deserialize_used_key_hashes_amqf().transpose()
+                        })
+                        .collect::<Result<Vec<_>>>()?,
+                );
+            }
+        }
 
         let result = self
             .parallel_scheduler
@@ -979,53 +987,72 @@ impl<S: ParallelScheduler, const FAMILIES: usize> TurboPersistence<S, FAMILIES> 
 
                             let mut keys_written = 0;
 
-                            let mut total_key_size = 0;
-                            let mut total_value_size = 0;
                             let mut current: Option<LookupEntry<'_>> = None;
-                            let mut entries = Vec::new();
-                            let mut last_entries = Vec::new();
-                            let mut last_entries_total_key_size = 0;
+
+                            #[derive(Default)]
+                            struct Collector<'l> {
+                                entries: Vec<LookupEntry<'l>>,
+                                total_key_size: usize,
+                                total_value_size: usize,
+                                last_entries: Vec<LookupEntry<'l>>,
+                                last_entries_total_key_size: usize,
+                            }
+                            let mut used_collector = Collector::default();
+                            let mut unused_collector = Collector::default();
                             for entry in iter {
                                 let entry = entry?;
 
                                 // Remove duplicates
                                 if let Some(current) = current.take() {
                                     if current.key != entry.key {
+                                        let is_used = used_key_hashes[family as usize]
+                                            .iter()
+                                            .any(|amqf| amqf.contains(current.hash));
+                                        let collector = if is_used {
+                                            &mut used_collector
+                                        } else {
+                                            &mut unused_collector
+                                        };
                                         let key_size = current.key.len();
                                         let value_size = current.value.uncompressed_size_in_sst();
-                                        total_key_size += key_size;
-                                        total_value_size += value_size;
+                                        collector.total_key_size += key_size;
+                                        collector.total_value_size += value_size;
 
-                                        if total_key_size + total_value_size
+                                        if collector.total_key_size + collector.total_value_size
                                             > DATA_THRESHOLD_PER_COMPACTED_FILE
-                                            || entries.len() >= MAX_ENTRIES_PER_COMPACTED_FILE
+                                            || collector.entries.len()
+                                                >= MAX_ENTRIES_PER_COMPACTED_FILE
                                         {
                                             let selected_total_key_size =
-                                                last_entries_total_key_size;
-                                            swap(&mut entries, &mut last_entries);
-                                            last_entries_total_key_size = total_key_size - key_size;
-                                            total_key_size = key_size;
-                                            total_value_size = value_size;
+                                                collector.last_entries_total_key_size;
+                                            swap(
+                                                &mut collector.entries,
+                                                &mut collector.last_entries,
+                                            );
+                                            collector.last_entries_total_key_size =
+                                                collector.total_key_size - key_size;
+                                            collector.total_key_size = key_size;
+                                            collector.total_value_size = value_size;
 
-                                            if !entries.is_empty() {
+                                            if !collector.entries.is_empty() {
                                                 let seq = sequence_number
                                                     .fetch_add(1, Ordering::SeqCst)
                                                     + 1;
 
-                                                keys_written += entries.len() as u64;
+                                                keys_written += collector.entries.len() as u64;
                                                 new_sst_files.push(create_sst_file(
                                                     &self.parallel_scheduler,
-                                                    &entries,
+                                                    &collector.entries,
                                                     selected_total_key_size,
                                                     path,
                                                     seq,
                                                 )?);
 
-                                                entries.clear();
+                                                collector.entries.clear();
                                             }
                                         }
 
-                                        entries.push(current);
+                                        collector.entries.push(current);
                                     } else {
                                         // Override value
                                     }
@@ -1033,56 +1060,72 @@ impl<S: ParallelScheduler, const FAMILIES: usize> TurboPersistence<S, FAMILIES> 
                                 current = Some(entry);
                             }
                             if let Some(entry) = current {
-                                total_key_size += entry.key.len();
+                                let is_used = used_key_hashes[family as usize]
+                                    .iter()
+                                    .any(|amqf| amqf.contains(entry.hash));
+                                let collector = if is_used {
+                                    &mut used_collector
+                                } else {
+                                    &mut unused_collector
+                                };
+
+                                collector.total_key_size += entry.key.len();
                                 // Obsolete as we no longer need total_value_size
                                 // total_value_size += entry.value.uncompressed_size_in_sst();
-                                entries.push(entry);
+                                collector.entries.push(entry);
                             }
 
                             // If we have one set of entries left, write them to a new SST file
-                            if last_entries.is_empty() && !entries.is_empty() {
-                                let seq = sequence_number.fetch_add(1, Ordering::SeqCst) + 1;
+                            for collector in [&mut used_collector, &mut unused_collector] {
+                                if collector.last_entries.is_empty()
+                                    && !collector.entries.is_empty()
+                                {
+                                    let seq = sequence_number.fetch_add(1, Ordering::SeqCst) + 1;
 
-                                keys_written += entries.len() as u64;
-                                new_sst_files.push(create_sst_file(
-                                    &self.parallel_scheduler,
-                                    &entries,
-                                    total_key_size,
-                                    path,
-                                    seq,
-                                )?);
-                            } else
-                            // If we have two sets of entries left, merge them and
-                            // split it into two SST files, to avoid having a
-                            // single SST file that is very small.
-                            if !last_entries.is_empty() {
-                                last_entries.append(&mut entries);
+                                    keys_written += collector.entries.len() as u64;
+                                    new_sst_files.push(create_sst_file(
+                                        &self.parallel_scheduler,
+                                        &collector.entries,
+                                        collector.total_key_size,
+                                        path,
+                                        seq,
+                                    )?);
+                                } else
+                                // If we have two sets of entries left, merge them and
+                                // split it into two SST files, to avoid having a
+                                // single SST file that is very small.
+                                if !collector.last_entries.is_empty() {
+                                    collector.last_entries.append(&mut collector.entries);
 
-                                last_entries_total_key_size += total_key_size;
+                                    collector.last_entries_total_key_size +=
+                                        collector.total_key_size;
 
-                                let (part1, part2) = last_entries.split_at(last_entries.len() / 2);
+                                    let (part1, part2) = collector
+                                        .last_entries
+                                        .split_at(collector.last_entries.len() / 2);
 
-                                let seq1 = sequence_number.fetch_add(1, Ordering::SeqCst) + 1;
-                                let seq2 = sequence_number.fetch_add(1, Ordering::SeqCst) + 1;
+                                    let seq1 = sequence_number.fetch_add(1, Ordering::SeqCst) + 1;
+                                    let seq2 = sequence_number.fetch_add(1, Ordering::SeqCst) + 1;
 
-                                keys_written += part1.len() as u64;
-                                new_sst_files.push(create_sst_file(
-                                    &self.parallel_scheduler,
-                                    part1,
-                                    // We don't know the exact sizes so we estimate them
-                                    last_entries_total_key_size / 2,
-                                    path,
-                                    seq1,
-                                )?);
+                                    keys_written += part1.len() as u64;
+                                    new_sst_files.push(create_sst_file(
+                                        &self.parallel_scheduler,
+                                        part1,
+                                        // We don't know the exact sizes so we estimate them
+                                        collector.last_entries_total_key_size / 2,
+                                        path,
+                                        seq1,
+                                    )?);
 
-                                keys_written += part2.len() as u64;
-                                new_sst_files.push(create_sst_file(
-                                    &self.parallel_scheduler,
-                                    part2,
-                                    last_entries_total_key_size / 2,
-                                    path,
-                                    seq2,
-                                )?);
+                                    keys_written += part2.len() as u64;
+                                    new_sst_files.push(create_sst_file(
+                                        &self.parallel_scheduler,
+                                        part2,
+                                        collector.last_entries_total_key_size / 2,
+                                        path,
+                                        seq2,
+                                    )?);
+                                }
                             }
                             Ok(PartialMergeResult::Merged {
                                 new_sst_files,

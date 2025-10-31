@@ -283,6 +283,20 @@ impl MetaFile {
         &self.mmap
     }
 
+    pub fn deserialize_used_key_hashes_amqf(&self) -> Result<Option<qfilter::Filter>> {
+        if self.start_of_used_keys_amqf_data_offset == self.end_of_used_keys_amqf_data_offset {
+            return Ok(None);
+        }
+        let amqf = &self.amqf_data()[self.start_of_used_keys_amqf_data_offset as usize
+            ..self.end_of_used_keys_amqf_data_offset as usize];
+        Ok(Some(pot::from_slice(amqf).with_context(|| {
+            format!(
+                "Failed to deserialize used key hashes AMQF from {:08}.meta",
+                self.sequence_number
+            )
+        })?))
+    }
+
     pub fn retain_entries(&mut self, mut predicate: impl FnMut(u32) -> bool) -> bool {
         let old_len = self.entries.len();
         self.entries.retain(|entry| {
