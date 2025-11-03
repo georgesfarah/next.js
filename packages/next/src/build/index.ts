@@ -222,7 +222,7 @@ import {
   sortPages,
   sortSortableRouteObjects,
 } from '../shared/lib/router/utils/sortable-routes'
-import { mkdir } from 'fs/promises'
+import { cp, mkdir, writeFile } from 'fs/promises'
 import {
   createRouteTypesManifest,
   writeRouteTypesManifest,
@@ -4284,6 +4284,26 @@ export default async function build(
         .traceAsyncFn(() => telemetry.flush())
 
       await shutdownPromise
+
+      if (NextBuildContext.analyze) {
+        await cp(
+          path.join(__dirname, '../bundle-analyzer'),
+          path.join(dir, '.next/diagnostics/analyze'),
+          { recursive: true }
+        )
+
+        // Write an index of routes for the route picker
+        await writeFile(
+          path.join(dir, '.next/diagnostics/analyze/data/routes.json'),
+          JSON.stringify(
+            routesManifest.dynamicRoutes
+              .map((r) => r.page)
+              .concat(routesManifest.staticRoutes.map((r) => r.page)),
+            null,
+            2
+          )
+        )
+      }
     })
   } catch (e) {
     const telemetry: Telemetry | undefined = traceGlobals.get('telemetry')
