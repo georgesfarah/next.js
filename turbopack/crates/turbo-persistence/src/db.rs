@@ -469,7 +469,7 @@ impl<S: ParallelScheduler, const FAMILIES: usize> TurboPersistence<S, FAMILIES> 
             let set = &inner.accessed_key_hashes[family as usize];
             // len is only a snapshot at that time and it can change while we create the filter.
             // So we give it 5% more space to make resizes less likely.
-            let initial_capacity = set.len() * 19 / 20;
+            let initial_capacity = set.len() * 20 / 19;
             let mut amqf =
                 qfilter::Filter::with_fingerprint_size(initial_capacity as u64, u64::BITS as u8)
                     .unwrap();
