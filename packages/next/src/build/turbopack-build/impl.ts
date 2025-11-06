@@ -243,15 +243,20 @@ export async function workerMain(workerData: {
   })
   setGlobal('telemetry', telemetry)
 
-  const {
-    shutdownPromise: resultShutdownPromise,
-    buildTraceContext,
-    duration,
-  } = await turbopackBuild()
-  shutdownPromise = resultShutdownPromise
-  return {
-    buildTraceContext,
-    duration,
+  try {
+    const {
+      shutdownPromise: resultShutdownPromise,
+      buildTraceContext,
+      duration,
+    } = await turbopackBuild()
+    shutdownPromise = resultShutdownPromise
+    return {
+      buildTraceContext,
+      duration,
+    }
+  } finally {
+    // Always flush telemetry before worker exits (waits for async operations like setTimeout in debug mode)
+    await telemetry.flush()
   }
 }
 
