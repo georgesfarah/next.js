@@ -21,6 +21,7 @@ use crate::{
     compression::compress_into_buffer,
     constants::{MAX_MEDIUM_VALUE_SIZE, THREAD_LOCAL_SIZE_SHIFT},
     key::StoreKey,
+    meta_file::MetaEntryFlags,
     meta_file_builder::MetaFileBuilder,
     parallel_scheduler::ParallelScheduler,
     static_sorted_file_builder::{StaticSortedFileBuilderMeta, write_static_stored_file},
@@ -420,7 +421,9 @@ impl<K: StoreKey + Send + Sync, S: ParallelScheduler, const FAMILIES: usize>
         let path = self.db_path.join(format!("{seq:08}.sst"));
         let (meta, file) = self
             .parallel_scheduler
-            .block_in_place(|| write_static_stored_file(entries, total_key_size, &path, true))
+            .block_in_place(|| {
+                write_static_stored_file(entries, total_key_size, &path, MetaEntryFlags::FRESH)
+            })
             .with_context(|| format!("Unable to write SST file {seq:08}.sst"))?;
 
         #[cfg(feature = "verify_sst_content")]

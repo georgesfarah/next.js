@@ -1,4 +1,5 @@
 use std::{
+    fmt::Display,
     fs::File,
     hash::BuildHasherDefault,
     io::{BufReader, Seek},
@@ -8,6 +9,7 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail};
+use bitfield::bitfield;
 use byteorder::{BE, ReadBytesExt};
 use either::Either;
 use memmap2::{Mmap, MmapOptions};
@@ -31,6 +33,35 @@ impl quick_cache::Weighter<u32, Arc<qfilter::Filter>> for AmqfWeighter {
 pub type AmqfCache =
     quick_cache::sync::Cache<u32, Arc<qfilter::Filter>, AmqfWeighter, BuildHasherDefault<FxHasher>>;
 
+bitfield! {
+    #[derive(Clone, Copy, Default)]
+    pub struct MetaEntryFlags(u32);
+    impl Debug;
+    impl From<u32>;
+    /// The SST file was compacted and none of the entries have been accessed recently.
+    pub cold, set_cold: 0;
+    /// The SST file was freshly written and has not been compacted yet.
+    pub fresh, set_fresh: 1;
+}
+
+impl MetaEntryFlags {
+    pub const FRESH: MetaEntryFlags = MetaEntryFlags(0b10);
+    pub const COLD: MetaEntryFlags = MetaEntryFlags(0b01);
+    pub const WARM: MetaEntryFlags = MetaEntryFlags(0b00);
+}
+
+impl Display for MetaEntryFlags {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.fresh() {
+            write!(f, "fresh")
+        } else if self.cold() {
+            write!(f, "cold")
+        } else {
+            write!(f, "warm")
+        }
+    }
+}
+
 pub struct MetaEntry {
     /// The metadata for the static sorted file.
     sst_data: StaticSortedFileMetaData,
@@ -42,8 +73,8 @@ pub struct MetaEntry {
     max_hash: u64,
     /// The size of the SST file in bytes.
     size: u64,
-    /// If the file is cold or warm.
-    cold: bool,
+    /// The status flags for this entry.
+    flags: MetaEntryFlags,
     /// The offset of the start of the AMQF data in the meta file relative to the end of the
     /// header.
     start_of_amqf_data_offset: u32,
@@ -66,8 +97,8 @@ impl MetaEntry {
         self.size
     }
 
-    pub fn cold(&self) -> bool {
-        self.cold
+    pub fn flags(&self) -> MetaEntryFlags {
+        self.flags
     }
 
     pub fn amqf_size(&self) -> u32 {
@@ -236,7 +267,7 @@ impl MetaFile {
                 min_hash: file.read_u64::<BE>()?,
                 max_hash: file.read_u64::<BE>()?,
                 size: file.read_u64::<BE>()?,
-                cold: file.read_u32::<BE>()? != 0,
+                flags: MetaEntryFlags(file.read_u32::<BE>()?),
                 start_of_amqf_data_offset,
                 end_of_amqf_data_offset: file.read_u32::<BE>()?,
                 amqf: OnceLock::new(),

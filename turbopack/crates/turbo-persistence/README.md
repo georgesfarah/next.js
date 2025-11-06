@@ -49,7 +49,9 @@ A meta file can contain metadata about multiple SST files. The metadata is store
     - 8 bytes min hash
     - 8 bytes max hash
     - 8 bytes SST file size
-    - 4 bytes flags (bit 0: cold)
+    - 4 bytes flags
+      - bit 0: cold (compacted and not recently accessed)
+      - bit 1: fresh (not yet compacted)
     - 4 bytes end of AMQF offset relative to start of all AMQF data
   - 4 bytes end of AMQF offset relative to start of all AMQF data of the "used key hashes" AMQF
 - foreach described SST file

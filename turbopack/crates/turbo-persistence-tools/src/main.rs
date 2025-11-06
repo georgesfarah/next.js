@@ -34,14 +34,14 @@ fn main() -> Result<()> {
             amqf_size,
             amqf_entries,
             sst_size,
-            cold,
+            flags,
             key_compression_dictionary_size,
             block_count,
         } in meta_file.entries
         {
             println!(
-                "  {} SST {sequence_number:08}.sst: {min_hash:016x} - {max_hash:016x} (p = 1/{})",
-                if cold { "COLD" } else { "HOT" },
+                "  SST {sequence_number:08}.sst: {} {min_hash:016x} - {max_hash:016x} (p = 1/{})",
+                flags,
                 u64::MAX / (max_hash - min_hash + 1)
             );
             println!("    AMQF {amqf_entries} entries = {} KiB", amqf_size / 1024);
