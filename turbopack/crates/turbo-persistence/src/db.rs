@@ -1003,7 +1003,7 @@ impl<S: ParallelScheduler, const FAMILIES: usize> TurboPersistence<S, FAMILIES> 
                                     if current.key != entry.key {
                                         let is_used = used_key_hashes[family as usize]
                                             .iter()
-                                            .any(|amqf| amqf.contains(current.hash));
+                                            .any(|amqf| amqf.contains_fingerprint(current.hash));
                                         let collector = if is_used {
                                             &mut used_collector
                                         } else {
@@ -1059,7 +1059,7 @@ impl<S: ParallelScheduler, const FAMILIES: usize> TurboPersistence<S, FAMILIES> 
                             if let Some(entry) = current {
                                 let is_used = used_key_hashes[family as usize]
                                     .iter()
-                                    .any(|amqf| amqf.contains(entry.hash));
+                                    .any(|amqf| amqf.contains_fingerprint(entry.hash));
                                 let collector = if is_used {
                                     &mut used_collector
                                 } else {
