@@ -75,3 +75,123 @@
 0 -> 29 conditional = false
 
 29 -> 30 free var = FreeVar(global)
+
+0 -> 31 free var = FreeVar(obj)
+
+0 -> 32 null safe receiver = ???*0*
+- *0* FreeVar(obj)
+  ⚠️  unknown global
+  ⚠️  This value might have side effects
+
+0 -> 34 free var = FreeVar(obj)
+
+0 -> 35 null safe receiver = ???*0*
+- *0* FreeVar(obj)
+  ⚠️  unknown global
+  ⚠️  This value might have side effects
+
+0 -> 38 free var = FreeVar(obj)
+
+0 -> 39 null safe receiver = ???*0*
+- *0* FreeVar(obj)
+  ⚠️  unknown global
+  ⚠️  This value might have side effects
+
+0 -> 41 free var = FreeVar(obj)
+
+0 -> 42 null safe receiver = ???*0*
+- *0* FreeVar(obj)
+  ⚠️  unknown global
+  ⚠️  This value might have side effects
+
+0 -> 44 null safe receiver = ???*0*
+- *0* ???*1*["prop"]
+  ⚠️  unknown object
+  ⚠️  This value might have side effects
+- *1* FreeVar(obj)
+  ⚠️  unknown global
+  ⚠️  This value might have side effects
+
+0 -> 46 free var = FreeVar(obj)
+
+0 -> 47 null safe receiver = ???*0*
+- *0* FreeVar(obj)
+  ⚠️  unknown global
+  ⚠️  This value might have side effects
+
+0 -> 49 null safe receiver = ???*0*()
+- *0* ???*1*["method"]
+  ⚠️  unknown object
+  ⚠️  This value might have side effects
+- *1* FreeVar(obj)
+  ⚠️  unknown global
+  ⚠️  This value might have side effects
+
+0 -> 52 free var = FreeVar(obj)
+
+0 -> 53 null safe receiver = ???*0*
+- *0* FreeVar(obj)
+  ⚠️  unknown global
+  ⚠️  This value might have side effects
+
+0 -> 55 null safe receiver = ???*0*
+- *0* ???*1*["prop"]
+  ⚠️  unknown object
+  ⚠️  This value might have side effects
+- *1* FreeVar(obj)
+  ⚠️  unknown global
+  ⚠️  This value might have side effects
+
+0 -> 57 null safe receiver = ???*0*
+- *0* ???*1*["method"]
+  ⚠️  unknown object
+  ⚠️  This value might have side effects
+- *1* ???*2*["prop"]
+  ⚠️  unknown object
+  ⚠️  This value might have side effects
+- *2* FreeVar(obj)
+  ⚠️  unknown global
+  ⚠️  This value might have side effects
+
+57 -> 58 call = ???*0*()
+- *0* ???*1*["method"]
+  ⚠️  unknown object
+  ⚠️  This value might have side effects
+- *1* ???*2*["prop"]
+  ⚠️  unknown object
+  ⚠️  This value might have side effects
+- *2* FreeVar(obj)
+  ⚠️  unknown global
+  ⚠️  This value might have side effects
+
+0 -> 59 free var = FreeVar(obj)
+
+0 -> 60 null safe receiver = ???*0*
+- *0* FreeVar(obj)
+  ⚠️  unknown global
+  ⚠️  This value might have side effects
+
+0 -> 62 free var = FreeVar(obj)
+
+0 -> 63 null safe receiver = ???*0*
+- *0* FreeVar(obj)
+  ⚠️  unknown global
+  ⚠️  This value might have side effects
+
+0 -> 65 null safe receiver = ???*0*
+- *0* ???*1*[FreeVar(computed)]
+  ⚠️  unknown object
+  ⚠️  This value might have side effects
+- *1* FreeVar(obj)
+  ⚠️  unknown global
+  ⚠️  This value might have side effects
+
+0 -> 67 null safe receiver = null
+
+0 -> 69 null safe receiver = undefined
+
+0 -> 71 null safe receiver = null
+
+0 -> 73 null safe receiver = null
+
+0 -> 75 null safe receiver = undefined

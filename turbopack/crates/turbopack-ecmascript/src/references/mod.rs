@@ -309,7 +309,7 @@ impl AnalyzeEcmascriptModuleResultBuilder {
         self.async_module = ResolvedVc::cell(Some(async_module));
     }
 
-    /// Set whether this module is side-efffect free according to a user-provided directive.
+    /// Set whether this module is side-effect free according to a user-provided directive.
     pub fn set_has_side_effect_free_directive(&mut self, value: bool) {
         self.has_side_effect_free_directive = value;
     }
@@ -1345,6 +1345,30 @@ async fn analyze_ecmascript_module_internal(
 
                     handle_member(&ast_path, obj, prop, span, &analysis_state, &mut analysis)
                         .await?;
+                }
+                Effect::NullSafeAccessReceiver {
+                    obj,
+                    ast_path,
+                    effects,
+                } => {
+                    // Intentionally not awaited because `handle_member` reads this only when needed
+                    let obj = analysis_state
+                        .link_value(*obj, ImportAttributes::empty_ref())
+                        .await?;
+                    if matches!(obj.is_nullish(), Some(true)) {
+                        // Replace the receiver expression but don't bother simplifying the chain,
+                        // SWC can do that as part of minification.
+                        if analyze_mode.is_code_gen() && !obj.has_side_effects() {
+                            analysis.add_code_gen(ConstantConditionCodeGen::new(
+                                ConstantConditionValue::Nullish,
+                                ast_path.to_vec().into(),
+                            ));
+                        }
+                    } else {
+                        queue_stack
+                            .get_mut()
+                            .extend(effects.effects.into_iter().map(Action::Effect).rev())
+                    }
                 }
                 Effect::ImportedBinding {
                     esm_reference_index,

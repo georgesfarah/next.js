@@ -48,7 +48,7 @@ impl ConstantConditionCodeGen {
                         quote!("(\"TURBOPACK compile-time falsy\", 0)" as Expr)
                     }
                     ConstantConditionValue::Nullish => {
-                        quote!("(\"TURBOPACK compile-time nullish\", null)" as Expr)
+                        quote!("(\"TURBOPACK compile-time nullish\", void 0)" as Expr)
                     }
                 };
             }

@@ -4205,6 +4205,19 @@ mod tests {
                                 ));
                                 obj_steps + prop_steps
                             }
+                            Effect::NullSafeAccessReceiver { obj, effects, .. } => {
+                                let (obj, obj_steps) = resolve(
+                                    &var_graph,
+                                    *obj,
+                                    ImportAttributes::empty_ref(),
+                                    &var_cache,
+                                )
+                                .await;
+
+                                resolved.push((format!("{parent} -> {i} null safe receiver"), obj));
+                                queue.extend(effects.effects.into_iter().rev().map(|e| (i, e)));
+                                obj_steps
+                            }
                             Effect::Unreachable { .. } => {
                                 resolved.push((
                                     format!("{parent} -> {i} unreachable"),

@@ -93,7 +93,9 @@ impl ConditionalKind {
             | ConditionalKind::And { expr: block, .. }
             | ConditionalKind::Or { expr: block, .. }
             | ConditionalKind::NullishCoalescing { expr: block, .. }
-            | ConditionalKind::Labeled { body: block } => block.normalize(),
+            | ConditionalKind::Labeled { body: block } => {
+                block.normalize();
+            }
             ConditionalKind::IfElse { then, r#else, .. }
             | ConditionalKind::Ternary { then, r#else, .. } => {
                 then.normalize();
@@ -101,7 +103,7 @@ impl ConditionalKind {
             }
             ConditionalKind::IfElseMultiple { then, r#else, .. } => {
                 for block in then.iter_mut().chain(r#else.iter_mut()) {
-                    block.normalize();
+                    block.normalize()
                 }
             }
         }
@@ -167,6 +169,12 @@ pub enum Effect {
         ast_path: Vec<AstParentKind>,
         span: Span,
     },
+    /// The receiver of a null safe expression
+    NullSafeAccessReceiver {
+        obj: Box<JsValue>,
+        ast_path: Vec<AstParentKind>,
+        effects: Box<EffectsBlock>,
+    },
     /// A reference to an imported binding.
     ImportedBinding {
         esm_reference_index: usize,
@@ -224,6 +232,10 @@ impl Effect {
             Effect::Member { obj, prop, .. } => {
                 obj.normalize();
                 prop.normalize();
+            }
+            Effect::NullSafeAccessReceiver { obj, effects, .. } => {
+                obj.normalize();
+                effects.normalize();
             }
             Effect::ImportedBinding { .. } => {}
             Effect::TypeOf { arg, .. } => {
@@ -795,6 +807,87 @@ impl EvalContext {
                 AssignOp::Assign => self.eval(right),
                 _ => JsValue::unknown_empty(true, "compound assignment expression"),
             },
+
+            Expr::OptChain(OptChainExpr { base, optional, .. }) => {
+                // Optional chaining: obj?.prop or obj?.method()
+                // If optional is true and receiver is null/undefined, return undefined
+                // Otherwise, evaluate normally
+                match &**base {
+                    OptChainBase::Member(MemberExpr { obj, prop, .. }) => {
+                        let obj_value = self.eval(obj);
+
+                        // If this is an optional access and obj is null/undefined, return undefined
+                        if *optional {
+                            if let JsValue::Constant(ConstantValue::Null) = obj_value {
+                                return JsValue::Constant(ConstantValue::Undefined);
+                            }
+                            // Check if it's undefined
+                            if matches!(obj_value, JsValue::Constant(ConstantValue::Undefined)) {
+                                return JsValue::Constant(ConstantValue::Undefined);
+                            }
+                        }
+
+                        // Otherwise, evaluate the member access
+                        let prop_value = match prop {
+                            MemberProp::Ident(i) => i.sym.clone().into(),
+                            MemberProp::PrivateName(_) => {
+                                return JsValue::unknown_empty(
+                                    false,
+                                    "private names in optional chaining are not supported",
+                                );
+                            }
+                            MemberProp::Computed(ComputedPropName { expr, .. }) => self.eval(expr),
+                        };
+
+                        JsValue::member(Box::new(obj_value), Box::new(prop_value))
+                    }
+                    OptChainBase::Call(OptCall { callee, args, .. }) => {
+                        let callee_value = self.eval(callee);
+
+                        // If this is an optional call and callee is null/undefined, return
+                        // undefined
+                        if *optional {
+                            if let JsValue::Constant(ConstantValue::Null) = callee_value {
+                                return JsValue::Constant(ConstantValue::Undefined);
+                            }
+                            if matches!(callee_value, JsValue::Constant(ConstantValue::Undefined)) {
+                                return JsValue::Constant(ConstantValue::Undefined);
+                            }
+                        }
+
+                        // We currently do not handle spreads.
+                        if args.iter().any(|arg| arg.spread.is_some()) {
+                            return JsValue::unknown_empty(
+                                true,
+                                "spread in optional chaining calls is not supported",
+                            );
+                        }
+
+                        // Evaluate the call
+                        let args_values = args.iter().map(|arg| self.eval(&arg.expr)).collect();
+
+                        if let Expr::Member(MemberExpr { obj, prop, .. }) = unparen(callee) {
+                            let obj = Box::new(self.eval(obj));
+                            let prop = Box::new(match prop {
+                                MemberProp::Ident(i) => i.sym.clone().into(),
+                                MemberProp::PrivateName(_) => {
+                                    return JsValue::unknown_empty(
+                                        false,
+                                        "private names in optional chaining are not supported",
+                                    );
+                                }
+                                MemberProp::Computed(ComputedPropName { expr, .. }) => {
+                                    self.eval(expr)
+                                }
+                            });
+                            JsValue::member_call(obj, prop, args_values)
+                        } else {
+                            let func = Box::new(callee_value);
+                            JsValue::call(func, args_values)
+                        }
+                    }
+                }
+            }
 
             _ => JsValue::unknown_empty(true, "unsupported expression"),
         }
@@ -1694,6 +1787,142 @@ impl VisitAstPath for Analyzer<'_> {
     ) {
         self.check_member_expr_for_effects(member_expr, ast_path);
         member_expr.visit_children_with_ast_path(self, ast_path);
+    }
+
+    fn visit_opt_chain_expr<'ast: 'r, 'r>(
+        &mut self,
+        node: &'ast OptChainExpr,
+        ast_path: &mut swc_core::ecma::visit::AstNodePath<'r>,
+    ) {
+        // Optional chaining has control flow semantics:
+        // a?.b means: if a is null/undefined, return undefined, else access a.b
+        //
+        // The key insight from the AST structure:
+        // - OptChainExpr.optional indicates if THIS level has ?.
+        // - OptChainExpr.base contains either a MemberExpr or OptCall
+        // - The object/callee of that base may itself be an OptChainExpr (for nested ?.)
+        //
+        // We handle this by:
+        // 1. Visit the receiver (object/callee) normally - this may recursively hit another
+        //    OptChainExpr
+        // 2. If this level is optional, collect effects from the access/call and wrap in
+        //    NullSafeAccessReceiver
+        // 3. Otherwise, just visit normally
+
+        if !node.optional {
+            // No optional operator at this level, just visit children normally
+            // The visitor will handle member accesses and calls appropriately
+            node.visit_children_with_ast_path(self, ast_path);
+            return;
+        }
+
+        // This level has an optional operator (?.)
+        match &*node.base {
+            OptChainBase::Member(member) => {
+                // Visit the object first (may be another opt chain)
+                member.obj.visit_with_ast_path(self, ast_path);
+
+                // Get the receiver value for the null check
+                let receiver_value = Box::new(self.eval_context.eval(&member.obj));
+
+                // Collect effects from the member access
+                let prev_effects = take(&mut self.effects);
+
+                // Use the existing helper to add member effect
+                self.check_member_expr_for_effects(member, ast_path);
+
+                let optional_effects = Box::new(EffectsBlock {
+                    effects: take(&mut self.effects),
+                    range: AstPathRange::Exact(as_parent_path(ast_path)),
+                });
+
+                self.effects = prev_effects;
+
+                // Add the NullSafeAccessReceiver effect
+                self.add_effect(Effect::NullSafeAccessReceiver {
+                    obj: receiver_value,
+                    ast_path: as_parent_path(ast_path),
+                    effects: optional_effects,
+                });
+            }
+            OptChainBase::Call(call) => {
+                // Visit the callee first (may be another opt chain)
+                call.callee.visit_with_ast_path(self, ast_path);
+
+                // Visit arguments
+                for arg in call.args.iter() {
+                    arg.visit_with_ast_path(self, ast_path);
+                }
+
+                // Get the receiver value for the null check
+                let receiver_value = Box::new(self.eval_context.eval(&call.callee));
+
+                // Collect effects from the call
+                let prev_effects = take(&mut self.effects);
+
+                // Add call effect (reuse logic from handle_call)
+                let args: Vec<EffectArg> = call
+                    .args
+                    .iter()
+                    .map(|arg| {
+                        if arg.spread.is_some() {
+                            EffectArg::Spread
+                        } else {
+                            EffectArg::Value(self.eval_context.eval(&arg.expr))
+                        }
+                    })
+                    .collect();
+
+                if let Expr::Member(member) = unparen(&call.callee) {
+                    let obj = Box::new(self.eval_context.eval(&member.obj));
+                    let prop = Box::new(match &member.prop {
+                        MemberProp::Ident(i) => i.sym.clone().into(),
+                        MemberProp::PrivateName(_) => JsValue::unknown_empty(
+                            false,
+                            "private names in member expressions are not supported",
+                        ),
+                        MemberProp::Computed(ComputedPropName { expr, .. }) => {
+                            self.eval_context.eval(expr)
+                        }
+                    });
+
+                    self.add_effect(Effect::MemberCall {
+                        obj,
+                        prop,
+                        args,
+                        ast_path: as_parent_path(ast_path),
+                        span: call.span,
+                        in_try: is_in_try(ast_path),
+                        new: false,
+                    });
+                } else {
+                    let func = Box::new(self.eval_context.eval(&call.callee));
+
+                    self.add_effect(Effect::Call {
+                        func,
+                        args,
+                        ast_path: as_parent_path(ast_path),
+                        span: call.span,
+                        in_try: is_in_try(ast_path),
+                        new: false,
+                    });
+                }
+
+                let optional_effects = Box::new(EffectsBlock {
+                    effects: take(&mut self.effects),
+                    range: AstPathRange::Exact(as_parent_path(ast_path)),
+                });
+
+                self.effects = prev_effects;
+
+                // Add the NullSafeAccessReceiver effect
+                self.add_effect(Effect::NullSafeAccessReceiver {
+                    obj: receiver_value,
+                    ast_path: as_parent_path(ast_path),
+                    effects: optional_effects,
+                });
+            }
+        }
     }
 
     fn visit_expr<'ast: 'r, 'r>(

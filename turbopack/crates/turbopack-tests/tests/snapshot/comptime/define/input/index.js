@@ -58,5 +58,6 @@ p.env.NODE_ENV == 'production'
 
 p.env.NODE_ENV != 'production' && console.log('development')
 p.env.NODE_ENV == 'production' && console.log('production')
+console.log(DEFINED_NULL?.foo ?? console.log('defined'))
 
 console.log(__dirname)

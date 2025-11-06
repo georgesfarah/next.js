@@ -18,6 +18,94 @@ d = false
 
 e = true
 
+nullValue = null
+
+opt1 = ???*0*
+- *0* ???*1*["prop"]
+  ⚠️  unknown object
+  ⚠️  This value might have side effects
+- *1* FreeVar(obj)
+  ⚠️  unknown global
+  ⚠️  This value might have side effects
+
+opt10 = undefined["prop"]
+
+opt11 = null["method"]()
+
+opt12 = undefined
+
+opt13 = undefined
+
+opt2 = ???*0*()
+- *0* ???*1*["method"]
+  ⚠️  unknown object
+  ⚠️  This value might have side effects
+- *1* FreeVar(obj)
+  ⚠️  unknown global
+  ⚠️  This value might have side effects
+
+opt3 = ???*0*
+- *0* ???*1*["nested"]
+  ⚠️  unknown object
+  ⚠️  This value might have side effects
+- *1* ???*2*["prop"]
+  ⚠️  unknown object
+  ⚠️  This value might have side effects
+- *2* FreeVar(obj)
+  ⚠️  unknown global
+  ⚠️  This value might have side effects
+
+opt4 = ???*0*
+- *0* ???*1*["nested"]
+  ⚠️  unknown object
+  ⚠️  This value might have side effects
+- *1* ???*2*["prop"]
+  ⚠️  unknown object
+  ⚠️  This value might have side effects
+- *2* FreeVar(obj)
+  ⚠️  unknown global
+  ⚠️  This value might have side effects
+
+opt5 = ???*0*()["result"]
+- *0* ???*1*["method"]
+  ⚠️  unknown object
+  ⚠️  This value might have side effects
+- *1* FreeVar(obj)
+  ⚠️  unknown global
+  ⚠️  This value might have side effects
+
+opt6 = ???*0*()["result"]
+- *0* ???*1*["method"]
+  ⚠️  unknown object
+  ⚠️  This value might have side effects
+- *1* ???*2*["prop"]
+  ⚠️  unknown object
+  ⚠️  This value might have side effects
+- *2* FreeVar(obj)
+  ⚠️  unknown global
+  ⚠️  This value might have side effects
+
+opt7 = ???*0*
+- *0* ???*1*[FreeVar(computed)]
+  ⚠️  unknown object
+  ⚠️  This value might have side effects
+- *1* FreeVar(obj)
+  ⚠️  unknown global
+  ⚠️  This value might have side effects
+
+opt8 = ???*0*
+- *0* ???*1*["nested"]
+  ⚠️  unknown object
+  ⚠️  This value might have side effects
+- *1* ???*2*[FreeVar(computed)]
+  ⚠️  unknown object
+  ⚠️  This value might have side effects
+- *2* FreeVar(obj)
+  ⚠️  unknown global
+  ⚠️  This value might have side effects
+
+opt9 = null["prop"]
+
 resolve1 = (???*0* | 4)
 - *0* FreeVar(global)
   ⚠️  unknown global
@@ -38,6 +126,8 @@ resolve5 = (???*0* | false){falsy}
   ⚠️  This value might have side effects
 
 resolve6 = false
+
+undefinedValue = undefined
 
 x = true
 

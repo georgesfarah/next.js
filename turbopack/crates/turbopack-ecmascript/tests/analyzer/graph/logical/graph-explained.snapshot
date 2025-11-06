@@ -12,6 +12,34 @@ d (const after eval) = !(x)
 
 e (const after eval) = !(!(x))
 
+nullValue (const after eval) = null
+
+opt1 (const after eval) = FreeVar(obj)["prop"]
+
+opt10 (const after eval) = undefinedValue["prop"]
+
+opt11 (const after eval) = nullValue["method"]()
+
+opt12 (const after eval) = undefined
+
+opt13 (const after eval) = undefined
+
+opt2 (const after eval) = FreeVar(obj)["method"]()
+
+opt3 (const after eval) = FreeVar(obj)["prop"]["nested"]
+
+opt4 (const after eval) = FreeVar(obj)["prop"]["nested"]
+
+opt5 (const after eval) = FreeVar(obj)["method"]()["result"]
+
+opt6 (const after eval) = FreeVar(obj)["prop"]["method"]()["result"]
+
+opt7 (const after eval) = FreeVar(obj)[FreeVar(computed)]
+
+opt8 (const after eval) = FreeVar(obj)[FreeVar(computed)]["nested"]
+
+opt9 (const after eval) = nullValue["prop"]
+
 resolve1 (const after eval) = (1 && 2 && FreeVar(global) && 3 && 4)
 
 resolve2 (const after eval) = (1 && 2 && 0 && FreeVar(global) && 4)
@@ -23,6 +51,8 @@ resolve4 (const after eval) = (true || FreeVar(global))
 resolve5 (const after eval) = (FreeVar(global) && false)
 
 resolve6 (const after eval) = (false && FreeVar(global))
+
+undefinedValue (const after eval) = undefined
 
 x (const after eval) = true
 
