@@ -42,6 +42,8 @@ pub struct MetaEntry {
     max_hash: u64,
     /// The size of the SST file in bytes.
     size: u64,
+    /// If the file is cold or warm.
+    cold: bool,
     /// The offset of the start of the AMQF data in the meta file relative to the end of the
     /// header.
     start_of_amqf_data_offset: u32,
@@ -62,6 +64,10 @@ impl MetaEntry {
 
     pub fn size(&self) -> u64 {
         self.size
+    }
+
+    pub fn cold(&self) -> bool {
+        self.cold
     }
 
     pub fn amqf_size(&self) -> u32 {
@@ -230,6 +236,7 @@ impl MetaFile {
                 min_hash: file.read_u64::<BE>()?,
                 max_hash: file.read_u64::<BE>()?,
                 size: file.read_u64::<BE>()?,
+                cold: file.read_u32::<BE>()? != 0,
                 start_of_amqf_data_offset,
                 end_of_amqf_data_offset: file.read_u32::<BE>()?,
                 amqf: OnceLock::new(),

@@ -420,7 +420,7 @@ impl<K: StoreKey + Send + Sync, S: ParallelScheduler, const FAMILIES: usize>
         let path = self.db_path.join(format!("{seq:08}.sst"));
         let (meta, file) = self
             .parallel_scheduler
-            .block_in_place(|| write_static_stored_file(entries, total_key_size, &path))
+            .block_in_place(|| write_static_stored_file(entries, total_key_size, &path, true))
             .with_context(|| format!("Unable to write SST file {seq:08}.sst"))?;
 
         #[cfg(feature = "verify_sst_content")]

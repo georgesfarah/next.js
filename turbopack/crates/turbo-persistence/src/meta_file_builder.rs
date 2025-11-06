@@ -70,6 +70,7 @@ impl<'a> MetaFileBuilder<'a> {
             file.write_u64::<BE>(sst.min_hash)?;
             file.write_u64::<BE>(sst.max_hash)?;
             file.write_u64::<BE>(sst.size)?;
+            file.write_u32::<BE>(if sst.cold { 1 } else { 0 })?;
             amqf_offset += sst.amqf.len();
             file.write_u32::<BE>(amqf_offset as u32)?;
         }

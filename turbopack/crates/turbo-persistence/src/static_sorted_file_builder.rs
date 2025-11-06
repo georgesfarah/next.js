@@ -88,6 +88,8 @@ pub struct StaticSortedFileBuilderMeta<'a> {
     pub block_count: u16,
     /// The file size of the SST file
     pub size: u64,
+    /// If the file is cold or warm
+    pub cold: bool,
     /// The number of entries in the SST file
     pub entries: u64,
 }
@@ -96,6 +98,7 @@ pub fn write_static_stored_file<E: Entry>(
     entries: &[E],
     total_key_size: usize,
     file: &Path,
+    cold: bool,
 ) -> Result<(StaticSortedFileBuilderMeta<'static>, File)> {
     debug_assert!(entries.iter().map(|e| e.key_hash()).is_sorted());
 
@@ -141,6 +144,7 @@ pub fn write_static_stored_file<E: Entry>(
         key_compression_dictionary_length: key_dict.len().try_into().unwrap(),
         block_count,
         size: file.stream_position()?,
+        cold,
         entries: entries.len() as u64,
     };
     Ok((meta, file.into_inner()?))

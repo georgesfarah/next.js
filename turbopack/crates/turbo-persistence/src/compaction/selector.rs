@@ -37,6 +37,7 @@ fn extend_range(a: &mut RangeInclusive<u64>, b: &RangeInclusive<u64>) -> bool {
     extended
 }
 
+#[cfg(test)]
 #[derive(Debug)]
 pub struct CompactableMetrics {
     /// The total coverage of the compactables.
@@ -53,6 +54,7 @@ pub struct CompactableMetrics {
 }
 
 /// Computes metrics about the compactables.
+#[cfg(test)]
 pub fn compute_metrics<T: Compactable>(
     compactables: &[T],
     full_range: RangeInclusive<u64>,
@@ -167,6 +169,7 @@ impl DuplicationInfo {
     }
 
     /// The estimated size (in bytes) of a database segment containing `range` keys.
+    #[cfg(test)]
     fn size(&self, range: &RangeInclusive<u64>) -> u64 {
         if self.total_size == 0 {
             return 0;
@@ -633,13 +636,16 @@ mod tests {
 
                 let new_metrics = compute_metrics(&containers, 0..=KEY_RANGE);
                 println!(
-                    "Compaction done: coverage: {} ({}), overlap: {} ({}), duplication: {} ({})",
+                    "Compaction done: coverage: {} ({}), overlap: {} ({}), duplication: {} ({}), \
+                     duplicated_size: {} ({})",
                     new_metrics.coverage,
                     new_metrics.coverage - metrics.coverage,
                     new_metrics.overlap,
                     new_metrics.overlap - metrics.overlap,
                     new_metrics.duplication,
-                    new_metrics.duplication - metrics.duplication
+                    new_metrics.duplication - metrics.duplication,
+                    new_metrics.duplicated_size,
+                    (new_metrics.duplicated_size as f32) - metrics.duplicated_size as f32,
                 );
             } else {
                 println!("No compaction needed");
