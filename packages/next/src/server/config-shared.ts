@@ -409,6 +409,8 @@ export interface ExperimentalConfig {
 
   /**
    * Enable filesystem cache for the turbopack dev server.
+   *
+   * Defaults to `true` in canary releases.
    */
   turbopackFileSystemCacheForDev?: boolean
 
@@ -1525,6 +1527,8 @@ export const defaultConfig = Object.freeze({
     proxyClientMaxBodySize: 10_485_760, // 10MB
     hideLogsAfterAbort: false,
     mcpServer: true,
+    turbopackFileSystemCacheForDev: !isStableBuild(),
+    turbopackFileSystemCacheForBuild: false,
   },
   htmlLimitedBots: undefined,
   bundlePagesRouterDependencies: false,
