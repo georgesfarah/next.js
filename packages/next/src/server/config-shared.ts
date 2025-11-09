@@ -410,7 +410,7 @@ export interface ExperimentalConfig {
   /**
    * Enable filesystem cache for the turbopack dev server.
    *
-   * Defaults to `true` in canary releases.
+   * Defaults to `true`.
    */
   turbopackFileSystemCacheForDev?: boolean
 
